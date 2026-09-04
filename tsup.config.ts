@@ -5,20 +5,5 @@ export default defineConfig({
   format: ['esm'],
   clean: true,
   sourcemap: true,
-  outDir: 'dist',
-  noExternal: [/(.*)/],
-  external: [
-    '@prisma/client', 
-    'prisma', 
-    'bcryptjs', 
-    'cors', 
-    'dotenv', 
-    'express', 
-    'jsonwebtoken', 
-    'mongoose', 
-    'multer', 
-    'pg', 
-    'xlsx', 
-    'zod'
-  ],
+  outDir: 'dist'
 });
