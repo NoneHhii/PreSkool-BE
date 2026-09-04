@@ -273,7 +273,7 @@ export const importStudents = async (req: Request, res: Response) => {
         const seqMap: { [prefix: string]: number } = {};
 
         const allMajors = await prisma.major.findMany();
-        const majorMap = new Map(allMajors.map((m: any) => [String(m.code), m]));
+        const majorMap = new Map<string, any>(allMajors.map((m: any) => [String(m.code), m]));
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];

@@ -23,7 +23,7 @@ async function main() {
 
     const passwordHash = await bcrypt.hash(adminPassword, 10);
 
-    const admin = await prisma.$transaction(async (tx) => {
+    const admin = await prisma.$transaction(async (tx: any) => {
         const newAdmin = await tx.user.create({
             data: {
                 username: adminUsername,
