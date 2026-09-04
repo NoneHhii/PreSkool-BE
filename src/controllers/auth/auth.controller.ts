@@ -2,7 +2,7 @@ import type { Response, Request } from "express";
 import * as authService from "../../modules/auth/auth.service.ts";
 import { hashPassword } from "../../utils/password.ts";
 import prisma from "../../config/prisma.ts";
-import XLSX from "xlsx";
+import * as XLSX from "xlsx";
 
 export const login = async (
     req: Request,
@@ -273,7 +273,7 @@ export const importStudents = async (req: Request, res: Response) => {
         const seqMap: { [prefix: string]: number } = {};
 
         const allMajors = await prisma.major.findMany();
-        const majorMap = new Map(allMajors.map(m => [String(m.code), m]));
+        const majorMap = new Map(allMajors.map((m: any) => [String(m.code), m]));
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];

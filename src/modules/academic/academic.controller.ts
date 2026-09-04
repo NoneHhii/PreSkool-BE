@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import * as academicService from "./academic.service";
 import * as validation from "./academic.validation";
-
+import prisma from "../../config/prisma";
 // Faculties
 export const getFaculties = async (req: Request, res: Response) => {
     try {
