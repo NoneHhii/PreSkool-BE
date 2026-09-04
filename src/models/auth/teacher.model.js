@@ -8,7 +8,7 @@ const teacherSchema = new mongoose.Schema({
         unique: true
     },
 
-    employeeCode: {
+    teacherCode: {
         type: String,
         unique: true,
         required: true,

@@ -71,8 +71,18 @@ model Student {
 
   enrollmentDate DateTime?
   status         String   @default("ACTIVE")
+  
+  cohort         String?
+  majorId        String?
+  major          Major?   @relation(fields: [majorId], references: [id])
+  
+  homeroomClassId String?
+  homeroomClass   HomeroomClass? @relation(fields: [homeroomClassId], references: [id])
 
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  classes        ClassStudent[]
+  attendances    Attendance[]
 }
 
 model Teacher {
@@ -86,6 +96,9 @@ model Teacher {
   status         String   @default("ACTIVE")
 
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  classes        Class[]
+  homeroomClasses HomeroomClass[]
 }
 
 model RefreshToken {
@@ -102,4 +115,132 @@ model RefreshToken {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+model Faculty {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  
+  majors      Major[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Major {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  facultyId   String
+  faculty     Faculty  @relation(fields: [facultyId], references: [id])
+  
+  students    Student[]
+  homeroomClasses HomeroomClass[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Course {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  credits     Int
+  description String?
+  
+  prerequisites Course[] @relation("CoursePrerequisites")
+  prerequisiteFor Course[] @relation("CoursePrerequisites")
+
+  classes     Class[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Class {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id])
+  
+  teacherId   String?
+  teacher     Teacher? @relation(fields: [teacherId], references: [id])
+  
+  academicYear String  
+  semester     Int     
+  
+  students    ClassStudent[]
+  schedules   Schedule[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ClassStudent {
+  id          String   @id @default(uuid())
+  classId     String
+  class       Class    @relation(fields: [classId], references: [id])
+  
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id])
+  
+  enrolledAt  DateTime @default(now())
+  
+  @@unique([classId, studentId])
+}
+
+model Schedule {
+  id          String   @id @default(uuid())
+  classId     String
+  class       Class    @relation(fields: [classId], references: [id])
+  
+  date        DateTime @db.Date 
+  shift       String   
+  room        String
+  
+  attendances Attendance[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  EXCUSED
+  LATE
+}
+
+model Attendance {
+  id          String   @id @default(uuid())
+  scheduleId  String
+  schedule    Schedule @relation(fields: [scheduleId], references: [id])
+  
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id])
+  
+  status      AttendanceStatus
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([scheduleId, studentId])
+}
+
+model HomeroomClass {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  majorId     String
+  major       Major    @relation(fields: [majorId], references: [id])
+  cohort      String   
+  advisorId   String?  
+  advisor     Teacher? @relation(fields: [advisorId], references: [id])
+  
+  students    Student[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
