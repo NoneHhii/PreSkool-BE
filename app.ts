@@ -8,7 +8,11 @@ import academicRoute from "./src/modules/academic/academic.route.ts"
 const app = express();
 
 app.use(cors({
-    origin: "http://localhost:5173",
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        return callback(null, true); // Allow all origins for now to prevent CORS issues
+    },
     credentials: true,
 }));
 app.use(express.json());
