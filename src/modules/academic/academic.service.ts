@@ -177,8 +177,9 @@ export const getStudentAttendanceStats = async (studentId: string) => {
 };
 
 // Utilities for UI Lookups
-export const getStudents = async () => {
+export const getStudents = async (homeroomClassId?: string) => {
     return prisma.student.findMany({
+        where: homeroomClassId ? { homeroomClassId } : undefined,
         include: {
             user: {
                 include: {
@@ -310,7 +311,15 @@ export const getHomeroomClasses = async () => {
                         }
                     }
                 }
+            },
+            _count: {
+                select: {
+                    students: true
+                }
             }
+        },
+        orderBy: {
+            code: 'asc'
         }
     });
 };
@@ -358,7 +367,7 @@ export const assignHomeroomToClass = async (courseClassId: string, homeroomClass
 export const getUnassignedHomeroomStudents = async (cohort?: string, majorId?: string) => {
     const whereClause: any = {
         homeroomClassId: null, // Only students without a homeroom class
-        role: "STUDENT"
+        user: { role: "STUDENT" }
     };
 
     if (cohort) whereClause.cohort = cohort;
@@ -393,17 +402,51 @@ export const autoAssignHomerooms = async (data: {
     if (studentIds.length === 0) throw new Error("No students provided");
     if (numberOfClasses <= 0) throw new Error("Number of classes must be greater than 0");
 
-    const studentsPerClass = Math.ceil(studentIds.length / numberOfClasses);
+    const students = await prisma.student.findMany({
+        where: { id: { in: studentIds } },
+        include: { user: { include: { profile: true } } }
+    });
+
+    // 1. Sort students by First Name (A-Z)
+    students.sort((a, b) => {
+        const nameA = a.user.profile?.fullName || "";
+        const nameB = b.user.profile?.fullName || "";
+        const partsA = nameA.trim().split(" ");
+        const partsB = nameB.trim().split(" ");
+        const firstNameA = partsA.pop() || "";
+        const firstNameB = partsB.pop() || "";
+        if (firstNameA !== firstNameB) return firstNameA.localeCompare(firstNameB, "vi");
+        return nameA.localeCompare(nameB, "vi");
+    });
+
+    const sortedStudentIds = students.map(s => s.id);
+
+    const studentsPerClass = Math.ceil(sortedStudentIds.length / numberOfClasses);
     let currentStudentIndex = 0;
     const createdClasses = [];
     const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+    // 2. Fetch Curriculum for Semester 1 Mapping
+    let curriculum = await prisma.curriculum.findUnique({
+        where: { majorId_cohort: { majorId, cohort } },
+        include: { courses: { where: { semester: 1, isRequired: true }, include: { course: true } } }
+    });
+    if (!curriculum) {
+        const altCohort = cohort.startsWith("K") ? cohort.substring(1) : `K${cohort}`;
+        curriculum = await prisma.curriculum.findUnique({
+            where: { majorId_cohort: { majorId, cohort: altCohort } },
+            include: { courses: { where: { semester: 1, isRequired: true }, include: { course: true } } }
+        });
+    }
+
+    const academicYear = new Date().getFullYear() + "-" + (new Date().getFullYear() + 1);
+
     for (let i = 0; i < numberOfClasses; i++) {
-        const char = alphabet[i % 26]; // A, B, C...
-        const classCode = `${prefix}${char}${suffix || ""}`; // e.g. DHKTPM18A or DHKTPM18ATT
+        const char = alphabet[i % 26];
+        const classCode = `${prefix}${char}${suffix || ""}`;
         const className = `Lớp ${classCode}`;
 
-        // 1. Create Homeroom Class
+        // 3. Create Homeroom Class
         let homeroomClass = await prisma.homeroomClass.findUnique({ where: { code: classCode } });
         if (!homeroomClass) {
             homeroomClass = await prisma.homeroomClass.create({
@@ -417,17 +460,192 @@ export const autoAssignHomerooms = async (data: {
         }
         createdClasses.push(homeroomClass);
         
-        // 2. Assign students to this chunk
-        const chunk = studentIds.slice(currentStudentIndex, currentStudentIndex + studentsPerClass);
+        // 4. Assign students to this chunk
+        const chunk = sortedStudentIds.slice(currentStudentIndex, currentStudentIndex + studentsPerClass);
         if (chunk.length > 0) {
             await prisma.student.updateMany({
-                where: {
-                    id: { in: chunk }
-                },
-                data: {
-                    homeroomClassId: homeroomClass.id
-                }
+                where: { id: { in: chunk } },
+                data: { homeroomClassId: homeroomClass.id }
             });
+
+            // 5. Clone Course Classes, Auto-Enroll, Generate Schedules & Initialize LMS
+            if (curriculum && curriculum.courses.length > 0) {
+                const classIdsToEnroll: string[] = [];
+
+                for (let cIdx = 0; cIdx < curriculum.courses.length; cIdx++) {
+                    const currCourse = curriculum.courses[cIdx];
+                    const courseClassCode = `${currCourse.course.code}_${classCode}`;
+                    let courseClass = await prisma.class.findUnique({ where: { code: courseClassCode } });
+                    
+                    if (!courseClass) {
+                        courseClass = await prisma.class.create({
+                            data: {
+                                code: courseClassCode,
+                                courseId: currCourse.courseId,
+                                academicYear,
+                                semester: 1,
+                                minCapacity: 20,
+                                maxCapacity: 60,
+                                status: "OPEN"
+                            }
+                        });
+                    }
+                    classIdsToEnroll.push(courseClass.id);
+
+                    // 5a. Auto-Generate 10 Weeks Schedule (Thời khóa biểu kỳ 1)
+                    const existingSchedules = await prisma.schedule.count({ where: { classId: courseClass.id } });
+                    if (existingSchedules === 0) {
+                        const daysOfWeekOffset = (cIdx % 5) + 1; // 1 = Monday ... 5 = Friday
+                        const shifts = [
+                            "Sáng (Ca 1: 07:30 - 09:30)",
+                            "Sáng (Ca 2: 09:45 - 11:45)",
+                            "Chiều (Ca 3: 13:00 - 15:00)",
+                            "Chiều (Ca 4: 15:15 - 17:15)"
+                        ];
+                        const rooms = [
+                            "Phòng A101",
+                            "Phòng A102",
+                            "Phòng B201",
+                            "Phòng B202",
+                            "Lab CNTT 01",
+                            "Lab CNTT 02",
+                            "Hội trường C1"
+                        ];
+                        const assignedShift = shifts[(i + cIdx) % shifts.length];
+                        const assignedRoom = rooms[(i * 2 + cIdx) % rooms.length];
+
+                        const startDate = new Date();
+                        const currentDay = startDate.getDay();
+                        let daysUntilTarget = daysOfWeekOffset - currentDay;
+                        if (daysUntilTarget <= 0) daysUntilTarget += 7;
+
+                        const firstSessionDate = new Date(startDate);
+                        firstSessionDate.setDate(startDate.getDate() + daysUntilTarget);
+
+                        const scheduleRecords = [];
+                        for (let week = 0; week < 10; week++) {
+                            const sessionDate = new Date(firstSessionDate);
+                            sessionDate.setDate(firstSessionDate.getDate() + week * 7);
+                            scheduleRecords.push({
+                                classId: courseClass.id,
+                                date: sessionDate,
+                                shift: assignedShift,
+                                room: assignedRoom
+                            });
+                        }
+
+                        if (scheduleRecords.length > 0) {
+                            await prisma.schedule.createMany({
+                                data: scheduleRecords
+                            });
+                        }
+                    }
+
+                    // 5b. Auto-Initialize LMS Modules, Materials & Assignments (Không gian LMS)
+                    const existingModules = await prisma.lMSModule.count({ where: { classId: courseClass.id } });
+                    if (existingModules === 0) {
+                        await prisma.lMSModule.create({
+                            data: {
+                                classId: courseClass.id,
+                                title: `Tuần 1: Giới thiệu & Đề cương môn ${currCourse.course.name}`,
+                                week: 1,
+                                order: 1,
+                                materials: {
+                                    create: [
+                                        {
+                                            title: `Đề cương chi tiết học phần ${currCourse.course.code}.pdf`,
+                                            type: "PDF",
+                                            url: "https://preskool.edu.vn/materials/de-cuong.pdf"
+                                        },
+                                        {
+                                            title: `Slide bài giảng Tuần 1: Tổng quan môn học`,
+                                            type: "PDF",
+                                            url: "https://preskool.edu.vn/materials/slide-tuan-1.pdf"
+                                        },
+                                        {
+                                            title: `Video bài giảng khai giảng môn học`,
+                                            type: "VIDEO",
+                                            url: "https://preskool.edu.vn/videos/intro.mp4"
+                                        }
+                                    ]
+                                }
+                            }
+                        });
+
+                        await prisma.lMSModule.create({
+                            data: {
+                                classId: courseClass.id,
+                                title: `Tuần 2: Kiến thức nền tảng & Tài liệu trọng tâm`,
+                                week: 2,
+                                order: 2,
+                                materials: {
+                                    create: [
+                                        {
+                                            title: `Slide bài giảng Tuần 2: Lý thuyết cơ sở`,
+                                            type: "PDF",
+                                            url: "https://preskool.edu.vn/materials/slide-tuan-2.pdf"
+                                        },
+                                        {
+                                            title: `Tài liệu nghiên cứu mở rộng & Case study`,
+                                            type: "LINK",
+                                            url: "https://preskool.edu.vn/resources/case-study"
+                                        }
+                                    ]
+                                }
+                            }
+                        });
+
+                        await prisma.lMSModule.create({
+                            data: {
+                                classId: courseClass.id,
+                                title: `Tuần 3: Bài tập thực hành & Hướng dẫn Lab`,
+                                week: 3,
+                                order: 3,
+                                materials: {
+                                    create: [
+                                        {
+                                            title: `Hướng dẫn thực hành Lab Tuần 3`,
+                                            type: "PDF",
+                                            url: "https://preskool.edu.vn/materials/lab-tuan-3.pdf"
+                                        }
+                                    ]
+                                }
+                            }
+                        });
+
+                        const deadline = new Date();
+                        deadline.setDate(deadline.getDate() + 14);
+                        await prisma.assignment.create({
+                            data: {
+                                classId: courseClass.id,
+                                title: `Bài tập Khởi động Tuần 1 - ${currCourse.course.name}`,
+                                description: `Sinh viên đọc tài liệu Tuần 1 và hoàn thành bài thu hoạch/khảo sát đầu khóa trước thời hạn.`,
+                                deadline,
+                                allowLate: true,
+                                isGroup: false
+                            }
+                        });
+                    }
+                }
+
+                // Hard Allocation (Ghi danh cứng)
+                const enrollments = [];
+                for (const studentId of chunk) {
+                    for (const clsId of classIdsToEnroll) {
+                        enrollments.push({
+                            studentId,
+                            classId: clsId,
+                            registrationStatus: "ENROLLED" as any,
+                            isManualOverride: true
+                        });
+                    }
+                }
+
+                await prisma.classStudent.createMany({
+                    data: enrollments,
+                    skipDuplicates: true
+                });
+            }
         }
         currentStudentIndex += studentsPerClass;
     }
@@ -436,7 +654,114 @@ export const autoAssignHomerooms = async (data: {
         message: "Auto assigned homerooms successfully",
         classesCreated: createdClasses.length,
         studentsAssigned: studentIds.length,
-        classes: createdClasses
+        classes: createdClasses,
+        curriculumCoursesCloned: curriculum ? curriculum.courses.length : 0,
+        courses: curriculum ? curriculum.courses.map(c => ({ code: c.course.code, name: c.course.name, credits: c.course.credits })) : []
+    };
+};
+
+
+export const autoAssignAllFreshmen = async (cohortFilter?: string) => {
+    // 1. Find all unassigned freshmen
+    const whereClause: any = { homeroomClassId: null };
+    if (cohortFilter && cohortFilter.trim()) {
+        const alt = cohortFilter.startsWith("K") ? cohortFilter.substring(1) : "K" + cohortFilter;
+        whereClause.cohort = { in: [cohortFilter, alt] };
+    }
+
+    const unassignedStudents = await prisma.student.findMany({
+        where: whereClause,
+        include: { user: { include: { profile: true } } }
+    });
+
+    if (unassignedStudents.length === 0) {
+        return {
+            message: "Không tìm thấy tân sinh viên nào chưa có lớp sinh hoạt.",
+            totalStudents: 0,
+            classesCreated: 0,
+            totalCourseClassesCreated: 0,
+            details: []
+        };
+    }
+
+    // 2. Load all majors
+    const majors = await prisma.major.findMany();
+    const majorMap = new Map(majors.map(m => [m.id, m]));
+
+    const MAJOR_PREFIX_MAP: Record<string, string> = {
+        "7480201": "CNTT",
+        "7480103": "KTPM",
+        "7480202": "ATTT",
+        "7480107": "KHDL",
+        "7480104": "HTTT",
+        "7480102": "MMT",
+        "7340101": "QTKD",
+        "7340115": "MKT",
+        "7340120": "KDQT",
+        "7340122": "TMDT",
+        "7340201": "TCNH",
+        "7340301": "KT",
+        "7340302": "KTOAN",
+        "7220201": "NNA",
+        "7220204": "NNTQ",
+        "7510301": "DDT",
+        "7510303": "TDH"
+    };
+
+    // 3. Group students by majorId
+    const groupsByMajor = new Map<string, typeof unassignedStudents>();
+    for (const s of unassignedStudents) {
+        if (!s.majorId) continue;
+        if (!groupsByMajor.has(s.majorId)) {
+            groupsByMajor.set(s.majorId, []);
+        }
+        groupsByMajor.get(s.majorId)!.push(s);
+    }
+
+    let totalClassesCreated = 0;
+    let totalCurriculumCoursesCloned = 0;
+    const details = [];
+
+    // 4. For each major group, run the all-in-one autoAssignHomerooms
+    for (const [majorId, group] of groupsByMajor.entries()) {
+        const major = majorMap.get(majorId);
+        const majorCode = major?.code || "";
+        const studentCohort = group[0]?.cohort || cohortFilter || "1";
+        const shortAcronym = MAJOR_PREFIX_MAP[majorCode] || (majorCode.startsWith("7") ? "CN" + majorCode.substring(3) : majorCode);
+        const prefix = shortAcronym + studentCohort;
+        
+        // Target ~35 students per class (if >35 then 2 classes)
+        const numberOfClasses = Math.max(1, Math.ceil(group.length / 35));
+        const studentIds = group.map(s => s.id);
+
+        const assignRes = await autoAssignHomerooms({
+            majorId,
+            cohort: studentCohort,
+            studentIds,
+            numberOfClasses,
+            prefix
+        });
+
+        totalClassesCreated += assignRes.classesCreated;
+        totalCurriculumCoursesCloned += (assignRes.curriculumCoursesCloned * assignRes.classesCreated);
+
+        details.push({
+            majorName: major?.name || majorCode,
+            majorCode,
+            prefix,
+            cohort: studentCohort,
+            studentsCount: studentIds.length,
+            classesCreated: assignRes.classesCreated,
+            curriculumCoursesPerClass: assignRes.curriculumCoursesCloned
+        });
+    }
+
+    return {
+        message: "Đã phân lớp và tự động ghi danh toàn diện cho " + unassignedStudents.length + " tân sinh viên!",
+        totalStudents: unassignedStudents.length,
+        classesCreated: totalClassesCreated,
+        totalCourseClassesCreated: totalCurriculumCoursesCloned,
+        details
     };
 };
 

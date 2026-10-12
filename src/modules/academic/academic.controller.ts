@@ -146,7 +146,8 @@ export const getStudentAttendanceStats = async (req: Request, res: Response) => 
 // Utilities for UI Lookups
 export const getStudents = async (req: Request, res: Response) => {
     try {
-        const students = await academicService.getStudents();
+        const homeroomClassId = req.query.homeroomClassId as string | undefined;
+        const students = await academicService.getStudents(homeroomClassId);
         return res.status(200).json({ message: "Success", data: students });
     } catch (error: any) {
         return res.status(400).json({ message: error.message });
@@ -239,6 +240,17 @@ export const autoAssignHomerooms = async (req: Request, res: Response) => {
         if (!result.success) return res.status(400).json({ message: "Invalid data", errors: result.error.flatten() });
         const assignResult = await academicService.autoAssignHomerooms(result.data);
         return res.status(200).json({ message: "Success", data: assignResult });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
+
+export const autoAssignAllFreshmen = async (req: Request, res: Response) => {
+    try {
+        const cohort = req.body?.cohort as string | undefined;
+        const result = await academicService.autoAssignAllFreshmen(cohort);
+        return res.status(200).json({ message: "Success", data: result });
     } catch (error: any) {
         return res.status(400).json({ message: error.message });
     }

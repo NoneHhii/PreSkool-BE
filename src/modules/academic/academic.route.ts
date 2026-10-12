@@ -31,6 +31,7 @@ router.post("/classes/:id/assign-homeroom", requireRole("ADMIN"), academicContro
 router.get("/homerooms", academicController.getHomeroomClasses);
 router.post("/homerooms", requireRole("ADMIN"), academicController.createHomeroomClass);
 router.post("/homerooms/auto-assign", requireRole("ADMIN"), academicController.autoAssignHomerooms);
+router.post("/homerooms/auto-assign-all", requireRole("ADMIN"), academicController.autoAssignAllFreshmen);
 
 // Schedule
 router.get("/schedule", academicController.getSchedule);

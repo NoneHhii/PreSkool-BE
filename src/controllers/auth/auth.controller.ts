@@ -350,12 +350,12 @@ export const importStudents = async (req: Request, res: Response) => {
                         data: {
                             username: studentCode,
                             email: String(row.email),
-                            password: passwordHash,
+                            passwordHash: passwordHash,
                             role: "STUDENT",
                         }
                     });
 
-                    await tx.profile.create({
+                    await tx.userProfile.create({
                         data: {
                             userId: createdUser.id,
                             fullName: String(row.fullName),

@@ -32,7 +32,7 @@ export const createHomeroomClassSchema = z.object({
     code: z.string().min(2),
     name: z.string().min(2),
     majorId: z.string().uuid(),
-    cohort: z.string().min(2),
+    cohort: z.string().min(1),
     advisorId: z.string().uuid().optional(),
 });
 
@@ -68,7 +68,7 @@ export const markAttendanceSchema = z.object({
 
 export const autoAssignHomeroomsSchema = z.object({
     majorId: z.string().uuid(),
-    cohort: z.string().min(2),
+    cohort: z.string().min(1),
     studentIds: z.array(z.string().uuid()).min(1),
     numberOfClasses: z.number().int().min(1),
     prefix: z.string().min(2),
