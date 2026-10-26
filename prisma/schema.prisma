@@ -123,6 +123,13 @@ model User {
   collectedPayments PaymentTransaction[] @relation("CollectedBy")
   auditedGrades     GradeAuditLog[]      @relation("ModifiedBy")
 
+  // LMS relations
+  forumThreads      ForumThread[]        @relation("ThreadAuthor")
+  forumComments     ForumComment[]       @relation("CommentAuthor")
+  forumVotes        ForumVote[]
+  announcements     CourseAnnouncement[]
+  notifications     Notification[]
+
   @@index([role])
   @@index([status])
 }
@@ -194,6 +201,9 @@ model Student {
   requests              StudentRequest[]
   assignmentSubmissions AssignmentSubmission[]
   rescoreRequests       RescoreRequest[]
+  materialProgresses    MaterialProgress[]
+  groupMemberships      AssignmentGroupMember[]
+  quizAttempts          QuizAttempt[]
 }
 
 model StudentStatusLog {
@@ -368,8 +378,15 @@ model Class {
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
-  lmsmodules  LMSModule[]
-  assignments Assignment[]
+  syllabus            Json?
+  lmsmodules          LMSModule[]
+  assignments         Assignment[]
+  assignmentGroups    AssignmentGroup[]
+  quizzes             Quiz[]
+  forumThreads        ForumThread[]
+  virtualClassrooms   VirtualClassroom[]
+  gradeWeightConfig   GradeWeightConfig?
+  announcements       CourseAnnouncement[]
 }
 
 model ClassStudent {
@@ -619,6 +636,9 @@ enum MaterialType {
   PDF
   VIDEO
   LINK
+  PPTX
+  DOCX
+  SCORM
 }
 
 enum RescheduleStatus {
@@ -631,6 +651,17 @@ enum DifficultyLevel {
   EASY
   MEDIUM
   HARD
+  VERY_HARD
+}
+
+enum LmsQuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  FILL_BLANK
+  MATCHING
+  SHORT_ANSWER
+  CODE
 }
 
 model RescheduleRequest {
@@ -676,7 +707,8 @@ model LMSModule {
   week  Int
   order Int    @default(1)
 
-  materials LMSMaterial[]
+  materials    LMSMaterial[]
+  forumThreads ForumThread[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -688,12 +720,38 @@ model LMSMaterial {
   moduleId String
   module   LMSModule @relation(fields: [moduleId], references: [id])
 
-  title String
-  type  MaterialType
-  url   String
+  title                  String
+  type                   MaterialType
+  url                    String
+  description            String?
+  prerequisiteMaterialId String?
+  prerequisiteQuizId     String?
+  minQuizScore           Float?
+  unlockAt               DateTime?
+
+  progresses MaterialProgress[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model MaterialProgress {
+  id String @id @default(uuid())
+
+  materialId String
+  material   LMSMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  isCompleted     Boolean   @default(false)
+  progressPercent Float     @default(0)
+  completedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([materialId, studentId])
 }
 
 model Assignment {
@@ -702,16 +760,50 @@ model Assignment {
   classId String
   class   Class  @relation(fields: [classId], references: [id])
 
-  title       String
-  description String
-  deadline    DateTime
-  allowLate   Boolean  @default(false)
-  isGroup     Boolean  @default(false)
+  title            String
+  description      String
+  deadline         DateTime
+  openDate         DateTime?
+  cutOffDate       DateTime?
+  allowLate        Boolean   @default(false)
+  isGroup          Boolean   @default(false)
+  maxFileSizeMb    Int       @default(50)
+  allowedFileTypes String?
+  submissionType   String    @default("FILE")
+  rubric           Json?
 
   submissions AssignmentSubmission[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AssignmentGroup {
+  id String @id @default(uuid())
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  name String
+
+  members     AssignmentGroupMember[]
+  submissions AssignmentSubmission[]
+
+  createdAt DateTime @default(now())
+}
+
+model AssignmentGroupMember {
+  id String @id @default(uuid())
+
+  groupId String
+  group   AssignmentGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  isLeader Boolean @default(false)
+
+  @@unique([groupId, studentId])
 }
 
 model AssignmentSubmission {
@@ -723,9 +815,20 @@ model AssignmentSubmission {
   studentId String
   student   Student @relation(fields: [studentId], references: [id])
 
-  fileUrl  String
-  score    Float?
-  comments String?
+  groupId String?
+  group   AssignmentGroup? @relation(fields: [groupId], references: [id])
+
+  fileUrl        String?
+  onlineText     String?
+  linkUrl        String?
+  submissionType String?
+  version        Int      @default(1)
+  isLate         Boolean  @default(false)
+  score          Float?
+  feedback       String?
+  annotations    Json?
+  rubricScores   Json?
+  comments       String?
 
   submittedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -737,15 +840,243 @@ model QuestionBank {
   courseId String
   course   Course @relation(fields: [courseId], references: [id])
 
-  title      String
-  type       ExamType
-  difficulty DifficultyLevel
-  content    String
-  options    Json?
-  answer     String
+  title        String
+  type         ExamType
+  difficulty   DifficultyLevel
+  content      String
+  options      Json?
+  answer       String
+  chapter      String?
+  topic        String?
+  lmsType      LmsQuestionType?
+  codeLanguage String?
+  testCases    Json?
+
+  quizQuestions       QuizQuestion[]
+  quizAttemptAnswers  QuizAttemptAnswer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Quiz {
+  id String @id @default(uuid())
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  title            String
+  description      String?
+  openTime         DateTime
+  closeTime        DateTime
+  durationMinutes  Int
+  password         String?
+  ipRange          String?
+  maxAttempts      Int      @default(1)
+  shuffleQuestions Boolean  @default(true)
+  shuffleOptions   Boolean  @default(true)
+  passingScore     Float?   @default(5.0)
+  totalPoints      Float    @default(10.0)
+  questionMatrix   Json?
+
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuizQuestion {
+  id String @id @default(uuid())
+
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  questionBankId String
+  questionBank   QuestionBank @relation(fields: [questionBankId], references: [id])
+
+  points Float @default(1.0)
+  order  Int   @default(1)
+
+  @@unique([quizId, questionBankId])
+}
+
+model QuizAttempt {
+  id String @id @default(uuid())
+
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  attemptNumber  Int       @default(1)
+  startTime      DateTime  @default(now())
+  submittedAt    DateTime?
+  score          Float?
+  status         String    @default("IN_PROGRESS")
+  clientIp       String?
+  tabSwitchCount Int       @default(0)
+  cheatingLogs   Json?
+  questionOrder  Json?
+
+  answers QuizAttemptAnswer[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuizAttemptAnswer {
+  id String @id @default(uuid())
+
+  attemptId String
+  attempt   QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  questionBankId String
+  questionBank   QuestionBank @relation(fields: [questionBankId], references: [id])
+
+  studentAnswer Json?
+  isCorrect     Boolean?
+  score         Float?
+  feedback      String?
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([attemptId, questionBankId])
+}
+
+model ForumThread {
+  id String @id @default(uuid())
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  moduleId String?
+  module   LMSModule? @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+
+  authorId String
+  author   User   @relation("ThreadAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  title       String
+  content     String
+  attachments Json?
+  isPinned    Boolean @default(false)
+  isResolved  Boolean @default(false)
+  upvotes     Int     @default(0)
+
+  comments ForumComment[]
+  votes    ForumVote[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ForumComment {
+  id String @id @default(uuid())
+
+  threadId String
+  thread   ForumThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  content         String
+  attachments     Json?
+  isCorrectAnswer Boolean @default(false)
+  upvotes         Int     @default(0)
+
+  parentId String?
+  parent   ForumComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  ForumComment[] @relation("CommentReplies")
+
+  votes ForumVote[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ForumVote {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  threadId String?
+  thread   ForumThread?  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  commentId String?
+  comment   ForumComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  vote Int @default(1)
+
+  @@unique([userId, threadId, commentId])
+}
+
+model VirtualClassroom {
+  id String @id @default(uuid())
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  title        String
+  platform     String    @default("JITSI")
+  meetingUrl   String
+  roomPassword String?
+  startTime    DateTime
+  endTime      DateTime?
+  recordings   Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GradeWeightConfig {
+  id String @id @default(uuid())
+
+  classId String @unique
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  quizWeight       Float   @default(0.2)
+  assignmentWeight Float   @default(0.3)
+  midtermWeight    Float   @default(0.2)
+  finalWeight      Float   @default(0.3)
+  rubricRules      Json?
+  isLocked         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CourseAnnouncement {
+  id String @id @default(uuid())
+
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  title    String
+  content  String
+  isPinned Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String
+  message     String
+  type        String
+  referenceId String?
+  isRead      Boolean @default(false)
+
+  createdAt DateTime @default(now())
 }
 
 model RescoreRequest {
