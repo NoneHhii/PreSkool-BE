@@ -12,6 +12,7 @@ import affairsRoute from "./src/modules/affairs/affairs.route.ts"
 import teacherRoute from "./src/modules/teacher/teacher.route.ts"
 import lmsRoute from "./src/modules/lms/lms.route.ts"
 import advisorRoute from "./src/modules/advisor/advisor.route.ts"
+import teamsRoute from "./src/modules/teams/teams.route.ts"
 
 const app = express();
 
@@ -43,5 +44,6 @@ app.use("/api/v1/affairs", affairsRoute);
 app.use("/api/v1/teacher", teacherRoute);
 app.use("/api/v1/lms", lmsRoute);
 app.use("/api/v1/advisor", advisorRoute);
+app.use("/api/v1/teams", teamsRoute);
 
 export default app;

@@ -130,6 +130,24 @@ model User {
   announcements     CourseAnnouncement[]
   notifications     Notification[]
 
+  // MS Teams relations
+  presenceStatus     String                    @default("OFFLINE")
+  lastSeenAt         DateTime                  @default(now())
+  teamsOwned         Team[]                    @relation("TeamOwner")
+  teamMemberships    TeamMember[]
+  channelMemberships ChannelMember[]
+  teamMessages       TeamMessage[]
+  directMessages     DirectMessage[]
+  conversations      ConversationParticipant[]
+  hostedMeetings     TeamMeeting[]             @relation("MeetingHost")
+  handRaises         MeetingHandRaise[]
+  pollVotes          MeetingPollVote[]
+  meetingAttendances MeetingAttendanceLog[]
+  assignedTasks      TeamTask[]                @relation("TaskAssignee")
+  createdTasks       TeamTask[]                @relation("TaskCreator")
+  teamFiles          TeamFile[]
+  activityFeed       ActivityFeedItem[]
+
   @@index([role])
   @@index([status])
 }
@@ -204,6 +222,8 @@ model Student {
   materialProgresses    MaterialProgress[]
   groupMemberships      AssignmentGroupMember[]
   quizAttempts          QuizAttempt[]
+  meetingAttendances    MeetingAttendanceLog[]
+  appointments          OfficeHourAppointment[] @relation("StudentInAppointment")
 }
 
 model StudentStatusLog {
@@ -234,6 +254,7 @@ model Teacher {
   classes            Class[]
   homeroomClasses    HomeroomClass[]
   rescheduleRequests RescheduleRequest[]
+  appointments       OfficeHourAppointment[] @relation("TeacherInAppointment")
 }
 
 // -----------------------------------------------------------------------------
@@ -313,6 +334,7 @@ model HomeroomClass {
   advisor   Teacher? @relation(fields: [advisorId], references: [id])
 
   students Student[]
+  team     Team?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -387,6 +409,7 @@ model Class {
   virtualClassrooms   VirtualClassroom[]
   gradeWeightConfig   GradeWeightConfig?
   announcements       CourseAnnouncement[]
+  team                Team?
 }
 
 model ClassStudent {
@@ -1093,4 +1116,346 @@ model RescoreRequest {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// -----------------------------------------------------------------------------
+// MS TEAMS & REAL-TIME COLLABORATION (Luồng 3: Tương tác MS Teams)
+// -----------------------------------------------------------------------------
+
+model Team {
+  id String @id @default(uuid())
+
+  name        String
+  description String?
+  code        String?  @unique
+  type        String   @default("COURSE_CLASS") // "COURSE_CLASS", "HOMEROOM_CLASS", "CUSTOM"
+  avatarUrl   String?
+
+  classId String? @unique
+  class   Class?  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  homeroomClassId String?        @unique
+  homeroomClass   HomeroomClass? @relation(fields: [homeroomClassId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  members  TeamMember[]
+  channels TeamChannel[]
+  meetings TeamMeeting[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TeamMember {
+  id String @id @default(uuid())
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role String @default("MEMBER") // OWNER, MODERATOR, MEMBER
+
+  joinedAt DateTime @default(now())
+
+  @@unique([teamId, userId])
+}
+
+model TeamChannel {
+  id String @id @default(uuid())
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  name               String // "general", "q-and-a", "nhom-1"
+  displayName        String // "Chung (#General)", "Hỏi đáp / Thảo luận (#Q&A)", "🔒 Nhóm 1"
+  description        String?
+  type               String  @default("PUBLIC") // PUBLIC, PRIVATE
+  isAnnouncementOnly Boolean @default(false)
+  assignmentGroupId  String?
+
+  members  ChannelMember[]
+  messages TeamMessage[]
+  meetings TeamMeeting[]
+  tasks    TeamTask[]
+  files    TeamFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teamId, name])
+}
+
+model ChannelMember {
+  id String @id @default(uuid())
+
+  channelId String
+  channel   TeamChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now())
+
+  @@unique([channelId, userId])
+}
+
+model TeamMeeting {
+  id String @id @default(uuid())
+
+  channelId String?
+  channel   TeamChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  title           String
+  hostId          String
+  host            User      @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Cascade)
+  status          String    @default("SCHEDULED") // SCHEDULED, LIVE, ENDED
+  startTime       DateTime
+  endTime         DateTime?
+  actualStartTime DateTime?
+  actualEndTime   DateTime?
+  meetingUrl      String
+  roomCode        String    @unique
+  passcode        String?
+  isMuteForced    Boolean   @default(false)
+
+  activePresenterId String?
+
+  recordingUrl          String?
+  syncedToLms           Boolean @default(false)
+  syncedToErpAttendance Boolean @default(false)
+
+  breakoutRooms  Json?
+  whiteboardData Json?
+
+  polls       MeetingPoll[]
+  handRaises  MeetingHandRaise[]
+  attendances MeetingAttendanceLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MeetingHandRaise {
+  id String @id @default(uuid())
+
+  meetingId String
+  meeting   TeamMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  raisedAt  DateTime @default(now())
+  isLowered Boolean  @default(false)
+
+  @@index([meetingId, isLowered])
+}
+
+model MeetingPoll {
+  id String @id @default(uuid())
+
+  meetingId String
+  meeting   TeamMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  creatorId     String
+  question      String
+  options       Json
+  correctAnswer String?
+  isOpen        Boolean @default(true)
+
+  votes MeetingPollVote[]
+
+  createdAt DateTime @default(now())
+}
+
+model MeetingPollVote {
+  id String @id @default(uuid())
+
+  pollId String
+  poll   MeetingPoll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  selectedOption String
+  votedAt        DateTime @default(now())
+
+  @@unique([pollId, userId])
+}
+
+model MeetingAttendanceLog {
+  id String @id @default(uuid())
+
+  meetingId String
+  meeting   TeamMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+
+  joinedAt             DateTime  @default(now())
+  leftAt               DateTime?
+  totalDurationMinutes Int       @default(0)
+  status               String    @default("PRESENT") // PRESENT, LATE, ABSENT
+
+  @@unique([meetingId, userId])
+}
+
+model DirectConversation {
+  id String @id @default(uuid())
+
+  type String  @default("DIRECT") // DIRECT, GROUP
+  name String?
+
+  participants ConversationParticipant[]
+  messages     DirectMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ConversationParticipant {
+  id String @id @default(uuid())
+
+  conversationId String
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lastReadMessageId String?
+  joinedAt          DateTime @default(now())
+
+  @@unique([conversationId, userId])
+}
+
+model DirectMessage {
+  id String @id @default(uuid())
+
+  conversationId String
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  content     String
+  codeSnippet Json?
+  attachments Json?
+  replyToId   String?
+  reactions   Json?
+  mentions    Json?
+  isPinned    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TeamMessage {
+  id String @id @default(uuid())
+
+  channelId String
+  channel   TeamChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  content     String
+  codeSnippet Json?
+  attachments Json?
+  replyToId   String?
+  reactions   Json?
+  mentions    Json?
+  isPinned    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TeamTask {
+  id String @id @default(uuid())
+
+  channelId String
+  channel   TeamChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  status      String    @default("TODO") // TODO, IN_PROGRESS, REVIEW, DONE
+  priority    String    @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+
+  assigneeId String?
+  assignee   User?     @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  creatorId String
+  creator   User      @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  dueDate DateTime?
+  order   Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TeamFile {
+  id String @id @default(uuid())
+
+  channelId String
+  channel   TeamChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  uploaderId String
+  uploader   User   @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  name      String
+  url       String
+  sizeBytes Int?
+  mimeType  String?
+  folder    String @default("General")
+
+  createdAt DateTime @default(now())
+}
+
+model OfficeHourAppointment {
+  id String @id @default(uuid())
+
+  teacherId String
+  teacher   Teacher @relation("TeacherInAppointment", fields: [teacherId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   Student @relation("StudentInAppointment", fields: [studentId], references: [id], onDelete: Cascade)
+
+  title           String
+  topic           String?
+  appointmentDate DateTime @db.Date
+  startTime       String   // e.g. "09:00"
+  endTime         String   // e.g. "09:30"
+  status          String   @default("PENDING") // PENDING, CONFIRMED, CANCELLED, COMPLETED
+  meetingUrl      String?
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ActivityFeedItem {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title     String
+  content   String
+  type      String // MENTION, MEETING_STARTED, REPLY_THREAD, TASK_ASSIGNED, APPOINTMENT
+  teamId    String?
+  channelId String?
+  meetingId String?
+  isRead    Boolean @default(false)
+
+  createdAt DateTime @default(now())
 }

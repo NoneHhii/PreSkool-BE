@@ -1,31 +1,34 @@
 import 'dotenv/config';
-import connectDB from "./src/config/database.js";
-import app from "./app.js";
+import http from "http";
+import { Server as SocketIOServer } from "socket.io";
+import app from "./app.ts";
 import prisma from "./src/config/prisma.ts";
+import { initTeamsSocket } from "./src/modules/teams/teams.socket.ts";
 
+const server = http.createServer(app);
 
-// const io = new http.Server
+const io = new SocketIOServer(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST", "PUT", "DELETE"]
+    }
+});
+
+initTeamsSocket(io);
 
 const startServer = async () => {
     try {
         await prisma.$connect();
+        console.log("Database connected");
 
-        console.log(
-            "Database connected"
-        );
-
-        app.listen(process.env.PORT || 8000, () => {
-            console.log(`Server is running on port: ${process.env.PORT || 8000}`);
-
-        })
+        const PORT = process.env.PORT || 8000;
+        server.listen(PORT, () => {
+            console.log(`Server & Socket.io running on port: ${PORT}`);
+        });
     } catch (error) {
-        console.error(
-            "Failed to start server:",
-            error
-        );
-
+        console.error("Failed to start server:", error);
         process.exit(1);
     }
-}
+};
 
 startServer();
