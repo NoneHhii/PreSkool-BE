@@ -27,9 +27,10 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.get("/api/health", (req, res) => {
+app.get(["/", "/health", "/api/health"], (req, res) => {
     res.json({
-        message: "Preskool API is running"
+        status: "OK",
+        message: "Preskool API & Realtime Server is healthy"
     });
 });
 

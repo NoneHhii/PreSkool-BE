@@ -10,8 +10,12 @@ const server = http.createServer(app);
 const io = new SocketIOServer(server, {
     cors: {
         origin: "*",
-        methods: ["GET", "POST", "PUT", "DELETE"]
-    }
+        methods: ["GET", "POST", "PUT", "DELETE"],
+        credentials: true
+    },
+    transports: ["websocket", "polling"],
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 initTeamsSocket(io);

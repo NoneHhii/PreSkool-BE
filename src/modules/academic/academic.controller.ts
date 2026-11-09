@@ -328,3 +328,45 @@ export const unenrollClass = async (req: Request, res: Response) => {
         return res.status(400).json({ message: error.message });
     }
 };
+
+export const updateHomeroomAdvisor = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const advisorId = req.body.advisorId || req.body.teacherId;
+        if (!advisorId) return res.status(400).json({ message: "advisorId is required" });
+        const updated = await academicService.updateHomeroomAdvisor(id as string, advisorId);
+        return res.status(200).json({ message: "Cập nhật cố vấn học tập thành công", data: updated });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
+export const autoAssignAdvisorsToAllHomerooms = async (_req: Request, res: Response) => {
+    try {
+        const result = await academicService.autoAssignAdvisorsToAllHomerooms();
+        return res.status(200).json({ message: `Đã tự động phân bổ Cố vấn học tập cho ${result.updatedCount} lớp!`, data: result });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
+export const updateClassTeacher = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const teacherId = req.body.teacherId;
+        if (!teacherId) return res.status(400).json({ message: "teacherId is required" });
+        const updated = await academicService.updateClassTeacher(id as string, teacherId);
+        return res.status(200).json({ message: "Phân công giảng viên cho lớp thành công", data: updated });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
+export const autoAssignTeachersToAllClasses = async (_req: Request, res: Response) => {
+    try {
+        const result = await academicService.autoAssignTeachersToAllClasses();
+        return res.status(200).json({ message: `Đã tự động phân công Giảng viên cho ${result.updatedCount} lớp học phần!`, data: result });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};

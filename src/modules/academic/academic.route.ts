@@ -24,6 +24,9 @@ router.post("/courses", requireRole("ADMIN"), academicController.createCourse);
 router.get("/classes", academicController.getClasses);
 router.post("/classes", requireRole("ADMIN"), academicController.createClass);
 router.post("/classes/auto-assign", requireRole("ADMIN"), academicController.autoAssignClasses);
+router.post("/classes/auto-assign-teachers", requireRole("ADMIN"), academicController.autoAssignTeachersToAllClasses);
+router.put("/classes/:id/teacher", requireRole("ADMIN"), academicController.updateClassTeacher);
+router.put("/classes/:id", requireRole("ADMIN"), academicController.updateClassTeacher);
 router.post("/classes/:id/assign-students", requireRole("ADMIN"), academicController.assignStudentsToClass);
 router.post("/classes/:id/assign-homeroom", requireRole("ADMIN"), academicController.assignHomeroomToClass);
 
@@ -32,6 +35,9 @@ router.get("/homerooms", academicController.getHomeroomClasses);
 router.post("/homerooms", requireRole("ADMIN"), academicController.createHomeroomClass);
 router.post("/homerooms/auto-assign", requireRole("ADMIN"), academicController.autoAssignHomerooms);
 router.post("/homerooms/auto-assign-all", requireRole("ADMIN"), academicController.autoAssignAllFreshmen);
+router.post("/homerooms/auto-assign-advisors", requireRole("ADMIN"), academicController.autoAssignAdvisorsToAllHomerooms);
+router.put("/homerooms/:id/advisor", requireRole("ADMIN"), academicController.updateHomeroomAdvisor);
+router.put("/homerooms/:id", requireRole("ADMIN"), academicController.updateHomeroomAdvisor);
 
 // Schedule
 router.get("/schedule", academicController.getSchedule);

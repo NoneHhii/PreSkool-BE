@@ -259,16 +259,22 @@ export const autoAssignClasses = async (data: any) => {
     const createdClasses = [];
     let currentStudentIndex = 0;
 
+    const teachers = await prisma.teacher.findMany({
+        include: { user: { include: { profile: true } } }
+    });
+
     for (let i = 0; i < numberOfClasses; i++) {
         // Format index as 2 digits, e.g. 01, 02
         const classIndex = (existingClasses + i + 1).toString().padStart(2, '0');
         const classCode = `${course.code}${yearPrefix}${classIndex}`;
+        const assignedTeacherId = data.teacherId || (teachers.length > 0 ? teachers[i % teachers.length].id : undefined);
         
         // 2. Create class
         const newClass = await prisma.class.create({
             data: {
                 code: classCode,
                 courseId,
+                teacherId: assignedTeacherId,
                 academicYear,
                 semester
             }
@@ -441,10 +447,15 @@ export const autoAssignHomerooms = async (data: {
 
     const academicYear = new Date().getFullYear() + "-" + (new Date().getFullYear() + 1);
 
+    const teachers = await prisma.teacher.findMany({
+        include: { user: { include: { profile: true } } }
+    });
+
     for (let i = 0; i < numberOfClasses; i++) {
         const char = alphabet[i % 26];
         const classCode = `${prefix}${char}${suffix || ""}`;
         const className = `Lớp ${classCode}`;
+        const assignedAdvisorId = teachers.length > 0 ? teachers[i % teachers.length].id : undefined;
 
         // 3. Create Homeroom Class
         let homeroomClass = await prisma.homeroomClass.findUnique({ where: { code: classCode } });
@@ -455,7 +466,13 @@ export const autoAssignHomerooms = async (data: {
                     name: className,
                     majorId,
                     cohort,
+                    advisorId: assignedAdvisorId,
                 }
+            });
+        } else if (!homeroomClass.advisorId && assignedAdvisorId) {
+            homeroomClass = await prisma.homeroomClass.update({
+                where: { id: homeroomClass.id },
+                data: { advisorId: assignedAdvisorId }
             });
         }
         createdClasses.push(homeroomClass);
@@ -475,6 +492,7 @@ export const autoAssignHomerooms = async (data: {
                 for (let cIdx = 0; cIdx < curriculum.courses.length; cIdx++) {
                     const currCourse = curriculum.courses[cIdx];
                     const courseClassCode = `${currCourse.course.code}_${classCode}`;
+                    const assignedTeacherId = teachers.length > 0 ? teachers[(i + cIdx) % teachers.length].id : undefined;
                     let courseClass = await prisma.class.findUnique({ where: { code: courseClassCode } });
                     
                     if (!courseClass) {
@@ -482,12 +500,18 @@ export const autoAssignHomerooms = async (data: {
                             data: {
                                 code: courseClassCode,
                                 courseId: currCourse.courseId,
+                                teacherId: assignedTeacherId,
                                 academicYear,
                                 semester: 1,
                                 minCapacity: 20,
                                 maxCapacity: 60,
                                 status: "OPEN"
                             }
+                        });
+                    } else if (!courseClass.teacherId && assignedTeacherId) {
+                        courseClass = await prisma.class.update({
+                            where: { id: courseClass.id },
+                            data: { teacherId: assignedTeacherId }
                         });
                     }
                     classIdsToEnroll.push(courseClass.id);
@@ -936,4 +960,72 @@ export const unenrollClass = async (studentId: string, classId: string) => {
             classId_studentId: { classId, studentId }
         }
     });
+};
+
+export const updateHomeroomAdvisor = async (id: string, advisorId: string) => {
+    return prisma.homeroomClass.update({
+        where: { id },
+        data: { advisorId },
+        include: {
+            major: true,
+            advisor: {
+                include: { user: { include: { profile: true } } }
+            }
+        }
+    });
+};
+
+export const autoAssignAdvisorsToAllHomerooms = async () => {
+    const homerooms = await prisma.homeroomClass.findMany({
+        orderBy: { code: 'asc' }
+    });
+    const teachers = await prisma.teacher.findMany({
+        include: { user: { include: { profile: true } } }
+    });
+    if (teachers.length === 0) throw new Error("Chưa có giảng viên nào trong hệ thống");
+
+    let updatedCount = 0;
+    for (let i = 0; i < homerooms.length; i++) {
+        const teacher = teachers[i % teachers.length];
+        await prisma.homeroomClass.update({
+            where: { id: homerooms[i].id },
+            data: { advisorId: teacher.id }
+        });
+        updatedCount++;
+    }
+    return { success: true, updatedCount };
+};
+
+export const updateClassTeacher = async (id: string, teacherId: string) => {
+    return prisma.class.update({
+        where: { id },
+        data: { teacherId },
+        include: {
+            course: true,
+            teacher: {
+                include: { user: { include: { profile: true } } }
+            }
+        }
+    });
+};
+
+export const autoAssignTeachersToAllClasses = async () => {
+    const classes = await prisma.class.findMany({
+        orderBy: { code: 'asc' }
+    });
+    const teachers = await prisma.teacher.findMany({
+        include: { user: { include: { profile: true } } }
+    });
+    if (teachers.length === 0) throw new Error("Chưa có giảng viên nào trong hệ thống");
+
+    let updatedCount = 0;
+    for (let i = 0; i < classes.length; i++) {
+        const teacher = teachers[i % teachers.length];
+        await prisma.class.update({
+            where: { id: classes[i].id },
+            data: { teacherId: teacher.id }
+        });
+        updatedCount++;
+    }
+    return { success: true, updatedCount };
 };
